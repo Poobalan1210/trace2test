@@ -1,0 +1,196 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Trace2Test with the Lantern Books sample shop: a production and a staging
+  checkout with seeded bugs, and the PayMock provider. Deploys the core stack
+  (../template.yaml) as a nested application and points it at the shop.
+
+Parameters:
+  IngestKey:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Shared secret the capture wrapper sends when posting a capture.
+  DashboardToken:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Shared secret the dashboard sends on every API call.
+  ProdApiKey:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: API key for the production Lantern Books checkout.
+  StagingApiKey:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: API key for the staging checkout. The replay step uses it.
+  StagingHasFix:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: Demo device. 'true' deploys the fixes for the seeded bugs (UPI rounding, missing address line 2) to staging only.
+  DeliveryTargets:
+    Type: String
+    Default: '{}'
+    Description: 'Passed to the core stack. For example {"lantern-checkout": {"repo": "you/sandbox"}} to see pull requests.'
+  GitHubTokenParameter:
+    Type: String
+    Default: ''
+    Description: Passed to the core stack.
+
+Conditions:
+  StagingFixed: !Equals [!Ref StagingHasFix, 'true']
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 15
+    CodeUri: ..
+    LoggingConfig:
+      LogGroup: !Ref ShopLogs
+    Environment:
+      Variables:
+        NODE_OPTIONS: --enable-source-maps
+
+Resources:
+  ShopLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /trace2test/${AWS::StackName}/shop
+      RetentionInDays: 7
+
+  # The production API, its route and its integration are plain API Gateway
+  # resources rather than a SAM event, so the API does not depend on the
+  # function. That lets the core stack take the API's URL while the function
+  # takes the core's ingest URL, without a cycle.
+  ShopProdApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-shop-prod
+      Description: Lantern Books checkout, production
+      ProtocolType: HTTP
+
+  ShopProdStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref ShopProdApi
+      StageName: $default
+      AutoDeploy: true
+
+  ShopProdIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ShopProdApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CheckoutProdFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  ShopProdCheckoutRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ShopProdApi
+      RouteKey: 'POST /checkout'
+      Target: !Sub integrations/${ShopProdIntegration}
+
+  ShopProdInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CheckoutProdFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ShopProdApi}/*
+
+  ShopStagingApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: Lantern Books checkout, staging
+
+  Trace2Test:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ../template.yaml
+      Parameters:
+        IngestKey: !Ref IngestKey
+        DashboardToken: !Ref DashboardToken
+        ReplayTargets: !Sub '{"lantern-checkout":{"baseUrl":"https://${ShopStagingApi}.execute-api.${AWS::Region}.amazonaws.com","routes":["POST /checkout"]}}'
+        StagingApiKey: !Ref StagingApiKey
+        DeliveryTargets: !Ref DeliveryTargets
+        GitHubTokenParameter: !Ref GitHubTokenParameter
+        DemoShopUrl: !Sub https://${ShopProdApi}.execute-api.${AWS::Region}.amazonaws.com
+        DemoShopApiKey: !Ref ProdApiKey
+
+  PayMockFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: PayMock, a fictional payment provider that only accepts whole paise
+      Handler: paymock.handler
+      Timeout: 10
+    Metadata:
+      BuildMethod: makefile
+
+  CheckoutProdFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Lantern Books POST /checkout (prod), wrapped with withTrace2Test
+      Handler: handler.handler
+      Environment:
+        Variables:
+          STAGE: prod
+          API_KEY: !Ref ProdApiKey
+          PAYMOCK_FUNCTION: !Ref PayMockFunction
+          FIX_UPI_ROUNDING: 'false'
+          FIX_ADDRESS_LINE2: 'false'
+          T2T_INGEST_URL: !GetAtt Trace2Test.Outputs.IngestUrl
+          T2T_INGEST_KEY: !Ref IngestKey
+      Policies:
+        - LambdaInvokePolicy: { FunctionName: !Ref PayMockFunction }
+    Metadata:
+      BuildMethod: makefile
+
+  CheckoutStagingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Lantern Books POST /checkout (staging). Never captures.
+      Handler: handler.handler
+      Environment:
+        Variables:
+          STAGE: staging
+          API_KEY: !Ref StagingApiKey
+          PAYMOCK_FUNCTION: !Ref PayMockFunction
+          FIX_UPI_ROUNDING: !If [StagingFixed, 'true', 'false']
+          FIX_ADDRESS_LINE2: !If [StagingFixed, 'true', 'false']
+      Policies:
+        - LambdaInvokePolicy: { FunctionName: !Ref PayMockFunction }
+      Events:
+        Checkout:
+          Type: HttpApi
+          Properties: { ApiId: !Ref ShopStagingApi, Method: POST, Path: /checkout }
+    Metadata:
+      BuildMethod: makefile
+
+# The core stack's outputs are repeated here, so the scripts read one stack either way.
+Outputs:
+  ShopProdUrl:
+    Description: Lantern Books checkout, production
+    Value: !Sub https://${ShopProdApi}.execute-api.${AWS::Region}.amazonaws.com
+  ShopStagingUrl:
+    Description: Lantern Books checkout, staging (T2T_TARGET_URL for the generated test)
+    Value: !Sub https://${ShopStagingApi}.execute-api.${AWS::Region}.amazonaws.com
+  IngestUrl:
+    Value: !GetAtt Trace2Test.Outputs.IngestUrl
+  T2tApiUrl:
+    Value: !GetAtt Trace2Test.Outputs.T2tApiUrl
+  DashboardUrl:
+    Value: !GetAtt Trace2Test.Outputs.DashboardUrl
+  StateMachineArn:
+    Value: !GetAtt Trace2Test.Outputs.StateMachineArn
+  WebBucketName:
+    Value: !GetAtt Trace2Test.Outputs.WebBucketName
+  DataBucketName:
+    Value: !GetAtt Trace2Test.Outputs.DataBucketName
+  WebDistributionId:
+    Value: !GetAtt Trace2Test.Outputs.WebDistributionId

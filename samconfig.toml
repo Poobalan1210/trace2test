@@ -1,0 +1,41 @@
+version = 0.1
+
+# Two ways to deploy:
+#   sam build && sam deploy                                   Trace2Test only (template.yaml)
+#   sam build --config-env demo && sam deploy --config-env demo   with the Lantern Books demo shop
+
+[default.global.parameters]
+stack_name = "trace2test"
+
+[default.build.parameters]
+# Build from the source tree so esbuild can resolve the npm workspace packages.
+build_in_source = true
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+
+[demo.global.parameters]
+stack_name = "trace2test-demo"
+
+[demo.build.parameters]
+template_file = "demo/template.yaml"
+build_in_source = true
+cached = true
+parallel = true
+
+[demo.validate.parameters]
+template_file = "demo/template.yaml"
+lint = true
+
+[demo.deploy.parameters]
+# The nested core stack needs CAPABILITY_AUTO_EXPAND.
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = true
+resolve_s3 = true

@@ -1,0 +1,651 @@
+{
+  "Comment": "Trace2Test: sanitize, replay on staging, compare, generate a regression test and deliver it. Two modes: capture and verify.",
+  "StartAt": "ModeChoice",
+  "States": {
+    "ModeChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.mode",
+          "StringEquals": "verify",
+          "Next": "Replay"
+        }
+      ],
+      "Default": "Sanitize"
+    },
+    "Sanitize": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${SanitizeFunctionArn}",
+        "Payload": {
+          "incidentId.$": "$.incidentId",
+          "mode.$": "$.mode"
+        }
+      },
+      "ResultSelector": {
+        "leakCount.$": "$.Payload.leakCount",
+        "redactionCount.$": "$.Payload.redactionCount"
+      },
+      "ResultPath": "$.sanitize",
+      "TimeoutSeconds": 30,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "States.Timeout"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "Validate"
+    },
+    "Validate": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ValidateFunctionArn}",
+        "Payload": {
+          "incidentId.$": "$.incidentId",
+          "mode.$": "$.mode"
+        }
+      },
+      "ResultSelector": {
+        "replayable.$": "$.Payload.replayable",
+        "testable.$": "$.Payload.testable",
+        "reason.$": "$.Payload.reason"
+      },
+      "ResultPath": "$.validate",
+      "TimeoutSeconds": 30,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "States.Timeout"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "ReplayableChoice"
+    },
+    "ReplayableChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.validate.replayable",
+          "BooleanEquals": true,
+          "Next": "Replay"
+        },
+        {
+          "Variable": "$.validate.testable",
+          "BooleanEquals": true,
+          "Next": "GenerateTest"
+        }
+      ],
+      "Default": "MarkNotReplayable"
+    },
+    "MarkNotReplayable": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Key": {
+          "pk": {
+            "S.$": "States.Format('INC#{}', $.incidentId)"
+          },
+          "sk": {
+            "S": "META"
+          }
+        },
+        "UpdateExpression": "SET #status = :s, reason = :r, resultSavedAt = :now",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":s": {
+            "S": "NOT_REPLAYABLE"
+          },
+          ":r": {
+            "S.$": "$.validate.reason"
+          },
+          ":now": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "End": true
+    },
+    "Replay": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ReplayFunctionArn}",
+        "Payload": {
+          "incidentId.$": "$.incidentId",
+          "mode.$": "$.mode"
+        }
+      },
+      "ResultSelector": {
+        "stagingStatus.$": "$.Payload.stagingStatus"
+      },
+      "ResultPath": "$.replay",
+      "TimeoutSeconds": 30,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "States.Timeout"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        },
+        {
+          "ErrorEquals": [
+            "NetworkError"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "Compare"
+    },
+    "Compare": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${CompareFunctionArn}",
+        "Payload": {
+          "incidentId.$": "$.incidentId",
+          "mode.$": "$.mode"
+        }
+      },
+      "ResultSelector": {
+        "verdict.$": "$.Payload.verdict",
+        "reason.$": "$.Payload.reason",
+        "stagingStatus.$": "$.Payload.stagingStatus",
+        "reproduced.$": "$.Payload.reproduced"
+      },
+      "ResultPath": "$.compare",
+      "TimeoutSeconds": 30,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "States.Timeout"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "AfterCompare"
+    },
+    "AfterCompare": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.mode",
+          "StringEquals": "verify",
+          "Next": "SaveVerifyResult"
+        }
+      ],
+      "Default": "VerdictChoice"
+    },
+    "VerdictChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.compare.verdict",
+          "StringEquals": "REPRODUCED",
+          "Next": "GenerateTest"
+        }
+      ],
+      "Default": "NoTest"
+    },
+    "GenerateTest": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${GenerateTestFunctionArn}",
+        "Payload": {
+          "incidentId.$": "$.incidentId",
+          "mode.$": "$.mode"
+        }
+      },
+      "ResultSelector": {
+        "testKey.$": "$.Payload.testKey",
+        "captureToTestMs.$": "$.Payload.captureToTestMs",
+        "generated.$": "$.Payload.generated",
+        "finalStatus.$": "$.Payload.finalStatus",
+        "replayable.$": "$.Payload.replayable",
+        "reproduced.$": "$.Payload.reproduced"
+      },
+      "ResultPath": "$.test",
+      "TimeoutSeconds": 30,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "States.Timeout"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "Deliver"
+    },
+    "Deliver": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${DeliverFunctionArn}",
+        "Payload": {
+          "incidentId.$": "$.incidentId",
+          "mode.$": "$.mode"
+        }
+      },
+      "ResultSelector": {
+        "delivered.$": "$.Payload.delivered"
+      },
+      "ResultPath": "$.deliver",
+      "TimeoutSeconds": 30,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "States.Timeout"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "SaveResult"
+    },
+    "NoTest": {
+      "Type": "Pass",
+      "Result": {
+        "testKey": "",
+        "captureToTestMs": 0,
+        "generated": 0,
+        "finalStatus": "NOT_REPRODUCED",
+        "replayable": 1,
+        "reproduced": 0
+      },
+      "ResultPath": "$.test",
+      "Next": "SaveResult"
+    },
+    "SaveResult": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Key": {
+          "pk": {
+            "S.$": "States.Format('INC#{}', $.incidentId)"
+          },
+          "sk": {
+            "S": "META"
+          }
+        },
+        "UpdateExpression": "SET #status = :s, resultSavedAt = :now",
+        "ConditionExpression": "attribute_not_exists(resultSavedAt)",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":s": {
+            "S.$": "$.test.finalStatus"
+          },
+          ":now": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ConditionalCheckFailedException"
+          ],
+          "ResultPath": null,
+          "Next": "Done"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "SaveMetrics"
+    },
+    "SaveMetrics": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Key": {
+          "pk": {
+            "S": "METRICS"
+          },
+          "sk": {
+            "S": "TOTALS"
+          }
+        },
+        "UpdateExpression": "ADD replayable :replayable, reproduced :rep, testsGenerated :gen, leaks :leaks, redactions :leaks, pipelineMsTotal :ms",
+        "ExpressionAttributeValues": {
+          ":replayable": {
+            "N.$": "States.Format('{}', $.test.replayable)"
+          },
+          ":rep": {
+            "N.$": "States.Format('{}', $.test.reproduced)"
+          },
+          ":gen": {
+            "N.$": "States.Format('{}', $.test.generated)"
+          },
+          ":leaks": {
+            "N.$": "States.Format('{}', $.sanitize.leakCount)"
+          },
+          ":ms": {
+            "N.$": "States.Format('{}', $.test.captureToTestMs)"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "Done"
+    },
+    "SaveVerifyResult": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Key": {
+          "pk": {
+            "S.$": "States.Format('INC#{}', $.incidentId)"
+          },
+          "sk": {
+            "S": "META"
+          }
+        },
+        "UpdateExpression": "SET #status = :s, verifiedAt = :now, stagingStatus = :st",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":s": {
+            "S.$": "$.compare.verdict"
+          },
+          ":now": {
+            "S.$": "$$.State.EnteredTime"
+          },
+          ":st": {
+            "N.$": "States.Format('{}', $.compare.stagingStatus)"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "FixedChoice"
+    },
+    "FixedChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.compare.verdict",
+          "StringEquals": "FIXED",
+          "Next": "MarkFirstFix"
+        }
+      ],
+      "Default": "Done"
+    },
+    "MarkFirstFix": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Key": {
+          "pk": {
+            "S.$": "States.Format('INC#{}', $.incidentId)"
+          },
+          "sk": {
+            "S": "META"
+          }
+        },
+        "UpdateExpression": "SET fixedAt = :now",
+        "ConditionExpression": "attribute_not_exists(fixedAt)",
+        "ExpressionAttributeValues": {
+          ":now": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ConditionalCheckFailedException"
+          ],
+          "ResultPath": null,
+          "Next": "Done"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "CountFix"
+    },
+    "CountFix": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Key": {
+          "pk": {
+            "S": "METRICS"
+          },
+          "sk": {
+            "S": "TOTALS"
+          }
+        },
+        "UpdateExpression": "ADD fixed :one",
+        "ExpressionAttributeValues": {
+          ":one": {
+            "N": "1"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "NotifyFix"
+    },
+    "NotifyFix": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${DeliverFunctionArn}",
+        "Payload": {
+          "incidentId.$": "$.incidentId",
+          "mode.$": "$.mode"
+        }
+      },
+      "ResultSelector": {
+        "delivered.$": "$.Payload.delivered"
+      },
+      "ResultPath": "$.deliver",
+      "TimeoutSeconds": 30,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "States.Timeout"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkPipelineFailed"
+        }
+      ],
+      "Next": "Done"
+    },
+    "Done": {
+      "Type": "Succeed"
+    },
+    "MarkPipelineFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Key": {
+          "pk": {
+            "S.$": "States.Format('INC#{}', $.incidentId)"
+          },
+          "sk": {
+            "S": "META"
+          }
+        },
+        "UpdateExpression": "SET #status = :s, failure = :f",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":s": {
+            "S": "PIPELINE_FAILED"
+          },
+          ":f": {
+            "M": {
+              "error": {
+                "S.$": "$.error.Error"
+              },
+              "cause": {
+                "S.$": "$.error.Cause"
+              }
+            }
+          }
+        }
+      },
+      "ResultPath": null,
+      "Next": "PipelineFailed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "PipelineFailed",
+      "Cause": "A pipeline step failed; see the incident for details."
+    }
+  }
+}

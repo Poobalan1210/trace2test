@@ -1,0 +1,13 @@
+{
+  "name": "@t2t/svc-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@t2t/shared": "*",
+    "@t2t/aws": "*"
+  },
+  "devDependencies": {
+    "@t2t/svc-shop": "*"
+  }
+}

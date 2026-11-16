@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "baseUrl": ".",
+    "paths": { "@t2t/shared": ["../shared/src/index.ts"] }
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

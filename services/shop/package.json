@@ -1,0 +1,11 @@
+{
+  "name": "@t2t/svc-shop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1169.0",
+    "@trace2test/sdk": "*",
+    "@t2t/shared": "*"
+  }
+}

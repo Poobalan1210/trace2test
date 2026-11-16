@@ -1,0 +1,558 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Trace2Test: captures failed API requests in production, redacts them,
+  replays them on staging, generates a Jest regression test and opens a pull
+  request with it. Point your services at the IngestUrl output. The Lantern
+  Books sample shop lives in demo/template.yaml, which deploys this stack too.
+
+Parameters:
+  IngestKey:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Shared secret the capture wrapper sends when posting a capture.
+  DashboardToken:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Shared secret the dashboard sends on every API call.
+  ReplayTargets:
+    Type: String
+    Default: '{}'
+    Description: >
+      JSON keyed by service name: {"my-service":{"baseUrl":"https://staging.example.com","routes":{"POST":["/orders"]}}}.
+      Requests from services not listed here still get a test, marked unverified.
+  StagingApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Sent as x-api-key on every replay to staging. Leave empty if staging needs none.
+  DeliveryTargets:
+    Type: String
+    Default: '{}'
+    Description: >
+      JSON keyed by service name: {"my-service": {"repo": "owner/name", "testDir": "regression", "baseBranch": "main", "draft": false}}.
+      Each new test is opened as a pull request in that repository.
+  GitHubTokenParameter:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(/[A-Za-z0-9_.-]+)*$'
+    Description: >
+      Name of an SSM SecureString parameter holding a GitHub token (fine-grained: Contents and Pull requests, read and write),
+      for example /trace2test/github-token. Empty turns delivery off.
+  GitHubApiUrl:
+    Type: String
+    Default: ''
+    Description: GitHub Enterprise Server only, for example https://github.example.com/api/v3. Empty means github.com.
+  DemoShopUrl:
+    Type: String
+    Default: ''
+    Description: Set by demo/template.yaml. The production shop the dashboard's demo button calls.
+  DemoShopApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Set by demo/template.yaml.
+
+Conditions:
+  HasGitHub: !Not [!Equals [!Ref GitHubTokenParameter, '']]
+  HasDemo: !Not [!Equals [!Ref DemoShopUrl, '']]
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 15
+    CodeUri: .
+    LoggingConfig:
+      LogGroup: !Ref FunctionLogs
+    Environment:
+      Variables:
+        NODE_OPTIONS: --enable-source-maps
+
+Resources:
+  # ---------------------------------------------------------------- storage
+
+  FunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /trace2test/${AWS::StackName}/functions
+      RetentionInDays: 7
+
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-t2t
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+        - { AttributeName: gsi1pk, AttributeType: S }
+        - { AttributeName: gsi1sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: gsi1
+          KeySchema:
+            - { AttributeName: gsi1pk, KeyType: HASH }
+            - { AttributeName: gsi1sk, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      LifecycleConfiguration:
+        Rules:
+          - Id: raw-captures-backstop
+            Status: Enabled
+            Prefix: raw/
+            ExpirationInDays: 1
+          - Id: incident-data
+            Status: Enabled
+            Prefix: incidents/
+            ExpirationInDays: 30
+
+  DataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DataBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt DataBucket.Arn, !Sub '${DataBucket.Arn}/*']
+            Condition: { Bool: { 'aws:SecureTransport': 'false' } }
+
+  # ------------------------------------------------------------- Trace2Test
+
+  T2tApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: Trace2Test ingest and dashboard API
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub https://${WebDistribution.DomainName}
+          - http://localhost:5173
+        AllowHeaders: [content-type, x-t2t-token]
+        AllowMethods: [GET, POST, OPTIONS]
+        MaxAge: 600
+      DefaultRouteSettings:
+        ThrottlingRateLimit: 20
+        ThrottlingBurstLimit: 40
+      RouteSettings:
+        'POST /incidents':
+          ThrottlingRateLimit: 10
+          ThrottlingBurstLimit: 20
+
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: POST /incidents. Stores a capture and starts the pipeline.
+      Handler: handler.handler
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+          DATA_BUCKET: !Ref DataBucket
+          STATE_MACHINE_ARN: !Ref PipelineStateMachine
+          INGEST_KEY: !Ref IngestKey
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+              Resource: !GetAtt Table.Arn
+            - Effect: Allow
+              Action: [s3:PutObject]
+              Resource: !Sub ${DataBucket.Arn}/raw/*
+            - Effect: Allow
+              Action: [states:StartExecution]
+              Resource: !Ref PipelineStateMachine
+            - Effect: Allow
+              Action: [states:DescribeExecution]
+              Resource: !Sub arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:t2t-pipeline-${AWS::StackName}:*
+      Events:
+        Ingest:
+          Type: HttpApi
+          Properties: { ApiId: !Ref T2tApi, Method: POST, Path: /incidents }
+    Metadata:
+      BuildMethod: makefile
+
+  SanitizeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Pipeline step. Second redaction pass, leak scan, writes the bundle.
+      Handler: handlers.sanitizeHandler
+      Environment:
+        Variables: { TABLE_NAME: !Ref Table, DATA_BUCKET: !Ref DataBucket }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
+              Resource: !GetAtt Table.Arn
+            - Effect: Allow
+              Action: [s3:GetObject, s3:DeleteObject]
+              Resource: !Sub ${DataBucket.Arn}/raw/*
+            - Effect: Allow
+              Action: [s3:GetObject, s3:PutObject]
+              Resource: !Sub ${DataBucket.Arn}/incidents/*
+            - Effect: Allow
+              Action: [s3:ListBucket]
+              Resource: !GetAtt DataBucket.Arn
+    Metadata:
+      BuildMethod: makefile
+
+  ValidateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Pipeline step. Decides whether an incident can be replayed.
+      Handler: handlers.validateHandler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+          DATA_BUCKET: !Ref DataBucket
+          REPLAY_TARGETS: !Ref ReplayTargets
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:UpdateItem]
+              Resource: !GetAtt Table.Arn
+            - Effect: Allow
+              Action: [s3:GetObject]
+              Resource: !Sub ${DataBucket.Arn}/incidents/*
+            - Effect: Allow
+              Action: [s3:ListBucket]
+              Resource: !GetAtt DataBucket.Arn
+    Metadata:
+      BuildMethod: makefile
+
+  ReplayFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Pipeline step. Sends the bundled request to staging only.
+      Handler: handlers.replayHandler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+          DATA_BUCKET: !Ref DataBucket
+          REPLAY_TARGETS: !Ref ReplayTargets
+          STAGING_API_KEY: !Ref StagingApiKey
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:UpdateItem]
+              Resource: !GetAtt Table.Arn
+            - Effect: Allow
+              Action: [s3:GetObject, s3:PutObject]
+              Resource: !Sub ${DataBucket.Arn}/incidents/*
+            - Effect: Allow
+              Action: [s3:ListBucket]
+              Resource: !GetAtt DataBucket.Arn
+    Metadata:
+      BuildMethod: makefile
+
+  CompareFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Pipeline step. Compares production and staging and returns a verdict.
+      Handler: handlers.compareHandler
+      Environment:
+        Variables: { TABLE_NAME: !Ref Table, DATA_BUCKET: !Ref DataBucket }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:UpdateItem]
+              Resource: !GetAtt Table.Arn
+            - Effect: Allow
+              Action: [s3:GetObject, s3:PutObject]
+              Resource: !Sub ${DataBucket.Arn}/incidents/*
+            - Effect: Allow
+              Action: [s3:ListBucket]
+              Resource: !GetAtt DataBucket.Arn
+    Metadata:
+      BuildMethod: makefile
+
+  GenerateTestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Pipeline step. Fills the Jest template and stores the test file.
+      Handler: handlers.generateTestHandler
+      Environment:
+        Variables: { TABLE_NAME: !Ref Table, DATA_BUCKET: !Ref DataBucket }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
+              Resource: !GetAtt Table.Arn
+            - Effect: Allow
+              Action: [s3:GetObject, s3:PutObject]
+              Resource: !Sub ${DataBucket.Arn}/incidents/*
+            - Effect: Allow
+              Action: [s3:ListBucket]
+              Resource: !GetAtt DataBucket.Arn
+    Metadata:
+      BuildMethod: makefile
+
+  DeliverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Pipeline step. Opens a pull request with the test, and comments on it when the fix is verified.
+      Handler: handlers.deliverHandler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+          DATA_BUCKET: !Ref DataBucket
+          DELIVERY_TARGETS: !Ref DeliveryTargets
+          GITHUB_TOKEN_PARAMETER: !Ref GitHubTokenParameter
+          GITHUB_API_URL: !Ref GitHubApiUrl
+          DASHBOARD_URL: !Sub https://${WebDistribution.DomainName}
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
+              Resource: !GetAtt Table.Arn
+            - Effect: Allow
+              Action: [s3:GetObject]
+              Resource: !Sub ${DataBucket.Arn}/incidents/*
+            - Effect: Allow
+              Action: [s3:ListBucket]
+              Resource: !GetAtt DataBucket.Arn
+        - !If
+          - HasGitHub
+          - Statement:
+              - Effect: Allow
+                Action: [ssm:GetParameter]
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GitHubTokenParameter}
+          - !Ref AWS::NoValue
+    Metadata:
+      BuildMethod: makefile
+
+  PipelineStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub t2t-pipeline-${AWS::StackName}
+      Type: STANDARD
+      DefinitionUri: statemachine/pipeline.asl.json
+      DefinitionSubstitutions:
+        SanitizeFunctionArn: !GetAtt SanitizeFunction.Arn
+        ValidateFunctionArn: !GetAtt ValidateFunction.Arn
+        ReplayFunctionArn: !GetAtt ReplayFunction.Arn
+        CompareFunctionArn: !GetAtt CompareFunction.Arn
+        GenerateTestFunctionArn: !GetAtt GenerateTestFunction.Arn
+        DeliverFunctionArn: !GetAtt DeliverFunction.Arn
+        TableName: !Ref Table
+      Policies:
+        - LambdaInvokePolicy: { FunctionName: !Ref SanitizeFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref ValidateFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref ReplayFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref CompareFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref GenerateTestFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref DeliverFunction }
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:UpdateItem]
+              Resource: !GetAtt Table.Arn
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Dashboard API. Incidents, tests, metrics, verify, and the demo trigger when the demo is deployed.
+      Handler: handler.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+          DATA_BUCKET: !Ref DataBucket
+          STATE_MACHINE_ARN: !Ref PipelineStateMachine
+          DASHBOARD_TOKEN: !Ref DashboardToken
+          SHOP_PROD_URL: !Ref DemoShopUrl
+          PROD_API_KEY: !Ref DemoShopApiKey
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem, dynamodb:Query]
+              Resource: [!GetAtt Table.Arn, !Sub '${Table.Arn}/index/gsi1']
+            - Effect: Allow
+              Action: [s3:GetObject]
+              Resource: !Sub ${DataBucket.Arn}/incidents/*
+            - Effect: Allow
+              Action: [s3:ListBucket]
+              Resource: !GetAtt DataBucket.Arn
+            - Effect: Allow
+              Action: [states:StartExecution]
+              Resource: !Ref PipelineStateMachine
+    Metadata:
+      BuildMethod: makefile
+
+  # The dashboard routes are declared directly rather than as SAM events, so
+  # T2tApi itself does not depend on ApiFunction. In the demo stack that breaks
+  # the cycle shop -> ingest URL -> T2tApi -> ApiFunction -> shop URL.
+  ApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref T2tApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ApiFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  ApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ApiFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${T2tApi}/*
+
+  ListIncidentsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref T2tApi
+      RouteKey: 'GET /incidents'
+      Target: !Sub integrations/${ApiIntegration}
+
+  GetIncidentRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref T2tApi
+      RouteKey: 'GET /incidents/{id}'
+      Target: !Sub integrations/${ApiIntegration}
+
+  GetIncidentTestRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref T2tApi
+      RouteKey: 'GET /incidents/{id}/test'
+      Target: !Sub integrations/${ApiIntegration}
+
+  VerifyIncidentRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref T2tApi
+      RouteKey: 'POST /incidents/{id}/verify'
+      Target: !Sub integrations/${ApiIntegration}
+
+  GetMetricsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref T2tApi
+      RouteKey: 'GET /metrics'
+      Target: !Sub integrations/${ApiIntegration}
+
+  DemoTriggerRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasDemo
+    Properties:
+      ApiId: !Ref T2tApi
+      RouteKey: 'POST /demo/trigger'
+      Target: !Sub integrations/${ApiIntegration}
+
+  # -------------------------------------------------------------- dashboard
+
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+
+  WebOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-web-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Trace2Test dashboard
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: web
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt WebOriginAccessControl.Id
+            S3OriginConfig: { OriginAccessIdentity: '' }
+        DefaultCacheBehavior:
+          TargetOriginId: web
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+        # Client-side routes (/incidents/:id, /shop, /setup) fall back to the app shell.
+        CustomErrorResponses:
+          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 0 }
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub ${WebBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt WebBucket.Arn, !Sub '${WebBucket.Arn}/*']
+            Condition: { Bool: { 'aws:SecureTransport': 'false' } }
+
+Outputs:
+  IngestUrl:
+    Description: Where the SDK posts captures (ingestUrl in its config)
+    Value: !Sub https://${T2tApi}.execute-api.${AWS::Region}.amazonaws.com/incidents
+  T2tApiUrl:
+    Description: Trace2Test API (ingest and dashboard)
+    Value: !Sub https://${T2tApi}.execute-api.${AWS::Region}.amazonaws.com
+  DashboardUrl:
+    Description: Trace2Test dashboard
+    Value: !Sub https://${WebDistribution.DomainName}
+  StateMachineArn:
+    Description: The t2t-pipeline state machine
+    Value: !Ref PipelineStateMachine
+  WebBucketName:
+    Description: Bucket for the dashboard's static files (scripts/deploy-web.sh syncs here)
+    Value: !Ref WebBucket
+  DataBucketName:
+    Description: Bucket for captures, bundles and generated tests
+    Value: !Ref DataBucket
+  WebDistributionId:
+    Description: CloudFront distribution in front of the dashboard (scripts/deploy-web.sh invalidates it)
+    Value: !Ref WebDistribution

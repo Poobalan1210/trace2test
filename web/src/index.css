@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { background: #090C12; color: #EDF0F5; }
+  body {
+    @apply bg-bg text-ink font-sans text-base antialiased;
+    font-feature-settings: 'tnum' 0;
+    /* A faint warm wash at the top so the page is not one flat colour. */
+    background-image: radial-gradient(1100px 520px at 50% -180px, rgba(245, 165, 36, 0.075), transparent 70%);
+    background-repeat: no-repeat;
+  }
+  h1, h2, h3 { letter-spacing: -0.011em; }
+  .font-mono, code, pre { font-variant-ligatures: none; }
+  :focus-visible { outline: 2px solid #F5A524; outline-offset: 2px; border-radius: 4px; }
+  ::selection { background: rgba(245, 165, 36, 0.3); }
+}
+
+@layer components {
+  /* Every panel gets the same lift, so surfaces read as layers rather than outlines. */
+  .rounded-panel.bg-panel { @apply shadow-panel; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-[14px] font-medium transition-state disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply btn bg-amber text-bg hover:brightness-110; box-shadow: 0 6px 20px -8px rgba(245, 165, 36, 0.6); }
+  .btn-ghost { @apply btn border border-line bg-panel text-ink hover:border-muted hover:bg-raised; }
+  .kicker { @apply text-[12px] font-semibold uppercase tracking-[0.08em] text-amber; }
+}
+
+@layer utilities {
+  .tnum { font-variant-numeric: tabular-nums; }
+  .transition-state { transition-property: color, background-color, border-color, opacity, box-shadow; transition-duration: 180ms; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
