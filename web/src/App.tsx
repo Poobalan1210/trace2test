@@ -11,7 +11,7 @@ import { IncidentsPage } from './pages/IncidentsPage';
 import { HomePage } from './pages/HomePage';
 import { IncidentPage } from './pages/IncidentPage';
 import { ShopPage } from './pages/ShopPage';
-import { SetupPage } from './pages/SetupPage';
+import { DocsPage } from './pages/DocsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
 const tokenRef: { current: string | null } = { current: null };
@@ -21,6 +21,8 @@ interface RuntimeConfig {
   stagingUrl?: string;
   /** True when the Lantern Books demo shop is deployed. Older configs without it imply it from stagingUrl. */
   demo?: boolean;
+  /** Published only for the public demo stack, so visitors are not asked for a token. */
+  token?: string;
 }
 
 export function App() {
@@ -62,7 +64,7 @@ export function App() {
     if (!config) return null;
     const local = /^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(config.apiUrl);
     const demo = config.demo ?? !!config.stagingUrl;
-    return { local, demo, stagingUrl: config.stagingUrl, api: httpApi(config.apiUrl, () => tokenRef.current) };
+    return { local, demo, stagingUrl: config.stagingUrl, api: httpApi(config.apiUrl, () => tokenRef.current ?? config.token ?? null) };
   }, [config]);
   tokenRef.current = token;
 
@@ -76,7 +78,7 @@ export function App() {
   }
   if (!ctx) return <div className="min-h-screen bg-bg" aria-busy="true" />;
 
-  if (!token) {
+  if (!token && !config?.token) {
     // Nothing loads until there is a token, so no page renders a wall of 401s behind the dialog.
     return (
       <div className="min-h-screen bg-bg">
@@ -104,7 +106,8 @@ export function App() {
               <Route path="/" element={ctx.demo ? <HomePage /> : <Navigate to="/incidents" replace />} />
               <Route path="/incidents" element={<IncidentsPage />} />
               <Route path="/incidents/:id" element={<IncidentPage />} />
-              <Route path="/setup" element={<SetupPage />} />
+              <Route path="/docs" element={<DocsPage />} />
+              <Route path="/setup" element={<Navigate to="/docs" replace />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
           </Routes>

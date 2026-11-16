@@ -1,0 +1,72 @@
+<!doctype html>
+<!-- Blog banner. Render at 1600x840: node docs scripts or any headless browser screenshot. -->
+<html><head><meta charset="utf-8"><title>Trace2Test banner</title>
+<style>
+  * { box-sizing:border-box; }
+  html,body { margin:0; }
+  body { width:1600px; height:840px; overflow:hidden; background:#0b0e14; color:#e8ecf3;
+         font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif; position:relative; }
+  .grid { position:absolute; inset:0; background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
+          background-size:40px 40px; mask-image:radial-gradient(ellipse at 70% 50%,#000 30%,transparent 80%); }
+  .glow { position:absolute; width:900px; height:900px; right:-200px; top:-60px; background:radial-gradient(circle,rgba(245,165,36,.13),transparent 60%); }
+  .left { position:absolute; left:96px; top:0; bottom:0; width:690px; display:flex; flex-direction:column; justify-content:center; }
+  .brand { display:flex; align-items:center; gap:18px; }
+  .brand svg { width:64px; height:64px; filter:drop-shadow(0 0 18px rgba(245,165,36,.35)); }
+  .brand span { font-size:40px; font-weight:700; letter-spacing:-.02em; }
+  h1 { margin:44px 0 0; font-size:64px; line-height:1.08; font-weight:750; letter-spacing:-.03em; }
+  h1 em { font-style:normal; color:#f5a524; }
+  p.sub { margin:26px 0 0; font-size:24px; line-height:1.5; color:#a3acbb; max-width:620px; }
+  .chips { margin-top:40px; display:flex; gap:12px; flex-wrap:wrap; }
+  .chip { font:500 17px/1 ui-monospace,SFMono-Regular,Menlo,monospace; padding:11px 16px; border-radius:9px; border:1px solid #2a3446; background:#121722; color:#c9d1dc; }
+  .chip.amber { border-color:rgba(245,165,36,.5); color:#f5a524; background:rgba(245,165,36,.07); }
+
+  .right { position:absolute; right:96px; top:50%; transform:translateY(-50%); width:600px; }
+  .card { position:relative; border:1px solid #2a3446; background:rgba(18,23,34,.92); border-radius:16px; padding:20px 24px; margin-bottom:22px; box-shadow:0 18px 50px rgba(0,0,0,.35); }
+  .card .k { display:flex; justify-content:space-between; align-items:center; font-size:15px; color:#8b95a7; }
+  .card .k b { display:flex; align-items:center; gap:10px; color:#e8ecf3; font-size:19px; font-weight:650; }
+  .dot { width:30px; height:30px; border-radius:50%; display:grid; place-items:center; font-size:15px; font-weight:700; }
+  .red { color:#ff6b6b; } .green { color:#3ecf8e; }
+  .dot.red { background:rgba(255,107,107,.13); border:1px solid rgba(255,107,107,.45); }
+  .dot.amber { background:rgba(245,165,36,.12); border:1px solid rgba(245,165,36,.5); color:#f5a524; }
+  .dot.green { background:rgba(62,207,142,.12); border:1px solid rgba(62,207,142,.45); }
+  .mono { font:15.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; color:#c9d1dc; margin-top:10px; }
+  .strike { color:#ff8f8f; text-decoration:line-through; } .ok { color:#3ecf8e; }
+  .rail { position:absolute; left:39px; top:76px; bottom:76px; width:2px; background:linear-gradient(#ff6b6b,#f5a524 45%,#3ecf8e); opacity:.55; }
+  .card.done { border-color:rgba(62,207,142,.45); }
+</style></head>
+<body>
+  <div class="grid"></div><div class="glow"></div>
+
+  <div class="left">
+    <div class="brand">
+      <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#121722" stroke="#3a4558"/><path d="M7 21.5h6l3-11 3 11h6" fill="none" stroke="#F5A524" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Trace2Test</span>
+    </div>
+    <h1>Failed request in.<br><em>Regression test out.</em></h1>
+    <p class="sub">Captures the exact request that broke in production, redacts customer data, reproduces it on staging and writes the test that proves the fix.</p>
+    <div class="chips">
+      <span class="chip amber">npm i @trace2tests/sdk</span>
+      <span class="chip">AWS serverless</span>
+      <span class="chip">Open source · MIT</span>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="rail"></div>
+    <div class="card">
+      <div class="k"><b><span class="dot red">!</span>Captured in production</b><span class="red">POST /checkout · 500</span></div>
+      <div class="mono">{ "coupon": "READ15", "paymentMethod": "upi" }</div>
+    </div>
+    <div class="card">
+      <div class="k"><b><span class="dot amber">✱</span>Redacted in your service</b><span>before it leaves</span></div>
+      <div class="mono"><span class="strike">asha.k@example.com</span> → <span class="ok">user_520f@redacted.example</span></div>
+    </div>
+    <div class="card">
+      <div class="k"><b><span class="dot amber">↻</span>Replayed on staging</b><span class="red">500 again · bug confirmed</span></div>
+    </div>
+    <div class="card done">
+      <div class="k"><b><span class="dot green">✓</span>Test written, fix proven</b><span class="green">Jest</span></div>
+      <div class="mono">checkout.test.js · <span class="red">fails today</span> · <span class="ok">passes after the fix</span></div>
+    </div>
+  </div>
+</body></html>

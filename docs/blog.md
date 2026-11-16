@@ -4,15 +4,19 @@ description: "Trace2Test turns a request that failed in production into a regres
 tags: aws, serverless, testing, node
 ---
 
+![Trace2Test: failed request in, regression test out](media/banner.png)
+
 # The bug only happens with one exact request. So keep the request.
 
 A support ticket comes in: *"Checkout fails when I use my coupon and pay by UPI."*
 
 You open the logs and find `500 Internal Server Error` and a stack trace. You don't find what was in the basket, which coupon, which payment method or which address. You try a few carts on staging. Everything works. The ticket gets closed as "can't reproduce", and next week the same customer hits the same bug.
 
-The information needed to reproduce the bug existed for exactly one moment: inside the request that failed. **Trace2Test** keeps that request, removes the private data, checks that the failure is real on staging, and writes a regression test that fails today and passes once the bug is fixed.
+The information needed to reproduce the bug existed for exactly one moment: inside the request that failed. So for this weekend's *No pipeline, no problem* challenge I built **Trace2Test**. It keeps that request, removes the private data, checks that the failure is real on staging, and writes a regression test that fails today and passes once the bug is fixed.
 
-[▶ Watch the 2½-minute demo](media/trace2test-demo.mp4), recorded against the live AWS deployment.
+There is no server to look after and no CI pipeline. The whole thing is one SAM template, deployed from a laptop with `sam deploy`, and when nothing is failing, nothing is running.
+
+[▶ Watch the 2½-minute demo on YouTube](https://youtu.be/jumX9CLc3Ew), recorded against the live AWS deployment.
 
 ![The incident page: captured, sanitized, replayed, reproduced, test generated, fix verified](media/demo-incident.png)
 
@@ -31,13 +35,9 @@ In the deployed demo, the steps took 873 ms to sanitize, 1.0 s to replay, 279 ms
 
 ![The generated test, with the staging replay next to the production failure](media/demo-test-written.png)
 
-## The test is not written by an AI
+## Why the test comes from a template, not an LLM
 
-A natural question: is an LLM writing these tests? No, and on purpose. The test is generated from a fixed template, filled with the captured request and the observed responses. That makes it:
-
-- **Deterministic:** the same incident always produces the same file, so a re-run of the pipeline doesn't produce a noisy diff.
-- **Reviewable:** every generated test has the same shape. A reviewer reads it once and then only looks at the request.
-- **Honest:** it asserts only what was observed, which is that this request got a server error. It doesn't guess what the right business answer should be.
+I didn't want a model writing tests that end up in someone's repository. Each test is a fixed template filled in with the captured request and the responses that were actually observed. The same incident always produces the same file, so re-running the pipeline never creates a noisy diff. Every test has the same shape, so a reviewer only has to read the request. And it only asserts what really happened, that this request got a server error, instead of guessing what the correct business answer should have been.
 
 The test is skipped when `T2T_TARGET_URL` is not set, so it never breaks a suite that has no server to call.
 
@@ -94,7 +94,7 @@ Replay is also opt-in per route. A service with no staging target configured sti
 
 ## Architecture
 
-Everything is serverless and deploys with one `sam deploy`:
+Everything is serverless and deploys with one `sam deploy`. There is no build server and no pipeline to maintain:
 
 ![Trace2Test architecture](media/architecture.png)
 
@@ -108,9 +108,11 @@ Everything is serverless and deploys with one `sam deploy`:
 
 The core stack and the demo shop are separate templates. Your services only need the core.
 
-## A bug that only AWS could find
+Serverless fits this problem well. Production failures are rare and bursty: nothing for days, then a hundred in a minute when a bad release goes out. Lambda and Step Functions only run when a capture arrives, DynamoDB and the HTTP API are pay-per-request, and the API is throttled so a failure storm can't run up a bill. A thousand identical failures become one incident with a counter, not a thousand pipeline runs.
 
-Deploying this to a real account for the first time found a bug that 114 local tests had missed. Confirming a fix failed with:
+## The bug my own tests missed
+
+The first deploy to a real AWS account turned up a bug that 114 local tests had missed. Confirming a fix failed with:
 
 ```
 ValidationException: Invalid UpdateExpression: Attribute name is a reserved keyword; reserved keyword: fixed
@@ -118,7 +120,7 @@ ValidationException: Invalid UpdateExpression: Attribute name is a reserved keyw
 
 The metrics update was `ADD fixed :one`, and `fixed` is one of DynamoDB's several hundred reserved words. The local stack uses an in-memory store that doesn't know the list, so every test passed.
 
-The fix was to stop picking safe names by hand. Every attribute in every expression is now written as `#name`, the alias map is derived from the expression, and a test fails the build if any expression contains a bare attribute name. Bugs that only appear with real input are what this project is about, so it was fitting to hit one while deploying it.
+I fixed it by no longer choosing safe names by hand. Every attribute in every expression is now written as `#name`, the alias map is built from the expression, and a test fails if any expression contains a bare attribute name. It's the same lesson the project is built on: some bugs only show up when real input reaches a real system.
 
 ## Limits
 

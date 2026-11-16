@@ -17,7 +17,14 @@ DASHBOARD_URL="$(out DashboardUrl)"
 [[ -n "$BUCKET" && "$BUCKET" != "None" ]] || { echo "Stack outputs not found. Deploy the stack first (sam build && sam deploy --guided)." >&2; exit 1; }
 
 npm run web:build
-printf '{ "apiUrl": "%s", "stagingUrl": "%s", "demo": %s }\n' "$API_URL" "$STAGING_URL" "$DEMO" > web/dist/config.json
+# The demo stack is public: publish its dashboard token so visitors are not asked for one.
+# Its data is the sample shop's, and the API is rate limited. Set PUBLIC_DEMO=false to keep the prompt.
+TOKEN_FIELD=""
+if [[ "$DEMO" == true && "${PUBLIC_DEMO:-true}" == true ]]; then
+  [[ -f .env ]] && source .env
+  [[ -n "${DASHBOARD_TOKEN:-}" ]] && TOKEN_FIELD=", \"token\": \"$DASHBOARD_TOKEN\""
+fi
+printf '{ "apiUrl": "%s", "stagingUrl": "%s", "demo": %s%s }\n' "$API_URL" "$STAGING_URL" "$DEMO" "$TOKEN_FIELD" > web/dist/config.json
 
 # Hashed assets can be cached for a year; the shell and config must not be.
 aws s3 sync web/dist "s3://$BUCKET" --delete --exclude index.html --exclude config.json \

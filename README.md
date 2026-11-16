@@ -8,6 +8,8 @@ Trace2Test captured that request the moment it failed, with the customer's email
 
 It runs in your own AWS account, and the SDK works with Node.js services on Lambda, Express or Fastify.
 
+**[▶ Watch the 2½-minute demo](https://youtu.be/jumX9CLc3Ew)**, recorded against a live AWS deployment. Read the write-up in [docs/blog.md](docs/blog.md).
+
 ## What it does
 
 1. **Capture.** `@trace2tests/sdk` wraps a Lambda handler or adds a middleware to Express or Fastify, and records a request only when it fails (a thrown error or a 5xx). Successful requests are never recorded.

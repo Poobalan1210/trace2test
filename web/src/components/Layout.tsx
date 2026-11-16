@@ -22,11 +22,19 @@ export function Layout() {
           <nav aria-label="Main" className="flex min-w-0 items-center gap-0.5 overflow-x-auto whitespace-nowrap text-[14px]">
             {demo && <NavLink to="/" end className={link}>Overview</NavLink>}
             <NavLink to="/incidents" className={link}>Failures</NavLink>
-            <NavLink to="/setup" className={(a) => `${link(a)} ${demo ? 'hidden sm:inline-block' : ''}`}>Setup</NavLink>
+            <NavLink to="/docs" className={link}>Docs</NavLink>
             {demo && <a href="/shop" className="rounded-md px-3 py-1.5 text-muted transition-state hover:bg-raised/60 hover:text-ink">Demo shop</a>}
           </nav>
+          <a
+            href="https://github.com/Poobalan1210/trace2test"
+            target="_blank"
+            rel="noreferrer"
+            className="ml-auto hidden shrink-0 rounded-md px-3 py-1.5 text-[14px] text-muted transition-state hover:bg-raised/60 hover:text-ink sm:inline-block"
+          >
+            GitHub ↗
+          </a>
           {local && (
-            <span className="ml-auto hidden items-center gap-2 rounded-full border border-line bg-panel px-3 py-1 text-[12px] text-muted sm:inline-flex" title="Connected to npm run local:stack">
+            <span className=" hidden items-center gap-2 rounded-full border border-line bg-panel px-3 py-1 text-[12px] text-muted sm:inline-flex" title="Connected to npm run local:stack">
               <span className="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden="true" /> Local stack
             </span>
           )}
