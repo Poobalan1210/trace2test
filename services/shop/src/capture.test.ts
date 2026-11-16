@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest';
-import { withTrace2Test } from '@trace2test/sdk';
+import { withTrace2Test } from '@trace2tests/sdk';
 import { fakeEmail, validateCapture, type Capture } from '@t2t/shared';
 import { createCheckoutHandler } from './checkout.js';
 import { STOCK } from './catalog.js';

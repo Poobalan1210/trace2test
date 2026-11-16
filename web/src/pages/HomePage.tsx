@@ -523,7 +523,7 @@ function FixPart({ d, since }: { d: IncidentDetail; since: number }) {
 
 /* ---------- 4. Reuse ---------- */
 
-const WRAP = `import { withTrace2Test } from '@trace2test/sdk';
+const WRAP = `import { withTrace2Test } from '@trace2tests/sdk';
 
 // Your existing Lambda handler stays exactly as it is.
 export const handler = withTrace2Test(myHandler, {
@@ -547,7 +547,7 @@ function Reuse() {
         sub="Lantern Books is only the example. Trace2Test is a separate stack plus a small SDK for Node.js services on Lambda, Express or Fastify, so a team can add it without changing their code."
       />
       <ol className="overflow-hidden rounded-panel border border-line bg-panel">
-        <Step n={1} icon={Code2} title="Wrap your handler" text="npm install @trace2test/sdk, then one line around your Lambda handler (or a middleware for Express and Fastify). Successful requests are never recorded.">
+        <Step n={1} icon={Code2} title="Wrap your handler" text="npm install @trace2tests/sdk, then one line around your Lambda handler (or a middleware for Express and Fastify). Successful requests are never recorded.">
           <Snippet code={WRAP} />
         </Step>
         <Step n={2} icon={RotateCcw} title="Point it at staging and your repo" text="Where your staging service is and which routes are safe to retry, and which repository gets a pull request with each new test. Both optional.">

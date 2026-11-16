@@ -1,5 +1,5 @@
 {
-  "name": "@trace2test/sdk",
+  "name": "@trace2tests/sdk",
   "version": "0.1.0",
   "description": "Capture failed HTTP requests in production, redacted inside your service, so Trace2Test can replay them on staging and write a regression test.",
   "license": "MIT",

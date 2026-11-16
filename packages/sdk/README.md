@@ -1,4 +1,4 @@
-# @trace2test/sdk
+# @trace2tests/sdk
 
 Captures failed HTTP requests in production for [Trace2Test](https://github.com/Poobalan1210/trace2test), with private data redacted inside your service before anything is sent. Trace2Test then replays the request on staging, writes a Jest regression test and opens a pull request with it.
 
@@ -12,7 +12,7 @@ You need a deployed Trace2Test stack. Its `IngestUrl` output and `IngestKey` par
 ## Install
 
 ```bash
-npm install @trace2test/sdk
+npm install @trace2tests/sdk
 ```
 
 ```ts
@@ -29,7 +29,7 @@ const config = {
 API Gateway HTTP APIs and REST APIs, function URLs and ALB targets.
 
 ```ts
-import { withTrace2Test } from '@trace2test/sdk';
+import { withTrace2Test } from '@trace2tests/sdk';
 
 export const handler = withTrace2Test(realHandler, config);
 ```
@@ -37,7 +37,7 @@ export const handler = withTrace2Test(realHandler, config);
 The wrapper sends the capture before returning, because Lambda freezes once the handler returns. It waits at most `timeoutMs` (1.5 s by default). If your handler answers unexpected errors with its own 500, return `serverError(err)` so the capture still records the error:
 
 ```ts
-import { serverError } from '@trace2test/sdk';
+import { serverError } from '@trace2tests/sdk';
 
 try { /* ... */ } catch (err) { return serverError(err); } // 500 {"error":"Internal error"}
 ```
@@ -45,7 +45,7 @@ try { /* ... */ } catch (err) { return serverError(err); } // 500 {"error":"Inte
 ### Express
 
 ```ts
-import { trace2testExpress } from '@trace2test/sdk';
+import { trace2testExpress } from '@trace2tests/sdk';
 
 const t2t = trace2testExpress(config);
 app.use(t2t.capture);       // first
@@ -57,7 +57,7 @@ app.use(t2t.recordErrors);  // after the routes, before your error handler
 ### Fastify
 
 ```ts
-import { trace2testFastify } from '@trace2test/sdk';
+import { trace2testFastify } from '@trace2tests/sdk';
 
 trace2testFastify(app, config); // on the root instance, before registering routes
 ```
@@ -69,7 +69,7 @@ On Express and Fastify the capture is sent after the response has gone out, so i
 Trace2Test replays failed requests on staging with an `x-t2t-replay` header. Run the code path, but skip what should not happen twice:
 
 ```ts
-import { isReplay } from '@trace2test/sdk';
+import { isReplay } from '@trace2tests/sdk';
 
 if (!isReplay(req)) await sendReceiptEmail(order); // a Lambda event, an Express or Fastify request
 ```

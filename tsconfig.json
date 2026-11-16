@@ -17,7 +17,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "paths": {
-      "@trace2test/sdk": [
+      "@trace2tests/sdk": [
         "./packages/sdk/src/index.ts"
       ]
     }

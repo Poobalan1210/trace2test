@@ -1,4 +1,4 @@
-import { withTrace2Test } from '@trace2test/sdk';
+import { withTrace2Test } from '@trace2tests/sdk';
 import { createCheckoutHandler } from './checkout.js';
 import { lambdaPaymentClient } from './payments.js';
 import { trace2testConfig } from './config.js';

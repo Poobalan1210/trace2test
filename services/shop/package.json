@@ -5,7 +5,7 @@
   "type": "module",
   "dependencies": {
     "@aws-sdk/client-lambda": "^3.1169.0",
-    "@trace2test/sdk": "*",
+    "@trace2tests/sdk": "*",
     "@t2t/shared": "*"
   }
 }

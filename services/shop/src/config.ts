@@ -1,4 +1,4 @@
-import type { Trace2TestConfig } from '@trace2test/sdk';
+import type { Trace2TestConfig } from '@trace2tests/sdk';
 
 /** How Lantern Books wires Trace2Test in. This is the whole integration. */
 export const trace2testConfig = (): Trace2TestConfig => ({

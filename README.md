@@ -10,7 +10,7 @@ It runs in your own AWS account, and the SDK works with Node.js services on Lamb
 
 ## What it does
 
-1. **Capture.** `@trace2test/sdk` wraps a Lambda handler or adds a middleware to Express or Fastify, and records a request only when it fails (a thrown error or a 5xx). Successful requests are never recorded.
+1. **Capture.** `@trace2tests/sdk` wraps a Lambda handler or adds a middleware to Express or Fastify, and records a request only when it fails (a thrown error or a 5xx). Successful requests are never recorded.
 2. **Redact.** Emails, card numbers, phone numbers, tokens, keys and passwords are replaced inside your service, before anything is sent. The replacements stay valid, so the request can still be replayed.
 3. **Sanitize.** A second pass runs in the pipeline. Anything the first pass missed is redacted and counted as a leak, and the raw capture is deleted.
 4. **Replay.** The request is sent to your staging service. The host comes only from stack configuration, never from the capture, and nothing is ever replayed against production.
@@ -143,11 +143,11 @@ The scenarios are defined once, in `services/shop/src/scenarios.ts`, and the tes
 ## Add it to your service
 
 ```bash
-npm install @trace2test/sdk
+npm install @trace2tests/sdk
 ```
 
 ```ts
-import { withTrace2Test, trace2testExpress, trace2testFastify } from '@trace2test/sdk';
+import { withTrace2Test, trace2testExpress, trace2testFastify } from '@trace2tests/sdk';
 
 const config = {
   ingestUrl: process.env.T2T_INGEST_URL,   // stack output IngestUrl
@@ -170,12 +170,12 @@ app.use(t2t.recordErrors);
 trace2testFastify(app, config);
 ```
 
-Set `STAGE=prod` on production only. Staging never captures, so a replayed failure cannot create an incident of its own. Successful responses are untouched and cause no network call. On Lambda the wrapper waits at most 1.5 seconds for the capture to send; on Express and Fastify the capture is sent after the response has gone out. It never changes your response or throws. If a Lambda handler answers unexpected errors with its own 500, return `serverError(err)` from `@trace2test/sdk` so the capture still knows which error it was.
+Set `STAGE=prod` on production only. Staging never captures, so a replayed failure cannot create an incident of its own. Successful responses are untouched and cause no network call. On Lambda the wrapper waits at most 1.5 seconds for the capture to send; on Express and Fastify the capture is sent after the response has gone out. It never changes your response or throws. If a Lambda handler answers unexpected errors with its own 500, return `serverError(err)` from `@trace2tests/sdk` so the capture still knows which error it was.
 
 Replays carry an `x-t2t-replay` header. Use `isReplay()` to skip side effects on staging while still running the failing code path:
 
 ```ts
-import { isReplay } from '@trace2test/sdk';
+import { isReplay } from '@trace2tests/sdk';
 if (!isReplay(req)) await sendReceiptEmail(order);
 ```
 
@@ -240,7 +240,7 @@ template.yaml            Trace2Test (SAM)
 demo/template.yaml       the Lantern Books demo, with Trace2Test nested inside
 Makefile                 one esbuild bundle per function, called by sam build
 packages/shared          types, redaction rules, fingerprinting, capture schema, JSON diff
-packages/sdk             @trace2test/sdk: Lambda, Express and Fastify adapters, isReplay
+packages/sdk             @trace2tests/sdk: Lambda, Express and Fastify adapters, isReplay
 packages/aws             S3, DynamoDB and Step Functions stores, plus in-memory fakes
 services/shop            Lantern Books checkout (prod and staging) and PayMock
 services/ingest          POST /incidents

@@ -11,13 +11,13 @@ const CONFIG = `{
 }`;
 
 const SNIPPETS: Record<string, string> = {
-  Lambda: `import { withTrace2Test } from '@trace2test/sdk';
+  Lambda: `import { withTrace2Test } from '@trace2tests/sdk';
 
 // API Gateway HTTP and REST APIs, function URLs and ALB targets.
 export const handler = withTrace2Test(realHandler, ${CONFIG});
 `,
   Express: `import express from 'express';
-import { trace2testExpress } from '@trace2test/sdk';
+import { trace2testExpress } from '@trace2tests/sdk';
 
 const t2t = trace2testExpress(${CONFIG});
 const app = express();
@@ -27,14 +27,14 @@ app.use(express.json());
 app.use(t2t.recordErrors);   // after the routes, before your error handler
 `,
   Fastify: `import Fastify from 'fastify';
-import { trace2testFastify } from '@trace2test/sdk';
+import { trace2testFastify } from '@trace2tests/sdk';
 
 const app = Fastify();
 trace2testFastify(app, ${CONFIG});   // before registering routes
 `,
 };
 
-const SIDE_EFFECTS = `import { isReplay } from '@trace2test/sdk';
+const SIDE_EFFECTS = `import { isReplay } from '@trace2tests/sdk';
 
 // Replays carry an x-t2t-replay header. Run the code path, skip the side effect.
 if (!isReplay(event)) await sendReceiptEmail(order);
@@ -80,7 +80,7 @@ function Install() {
       title="Install"
       aside={<CopyButton text={code} />}
     >
-      <p className="font-mono text-[13px] text-ink">npm install @trace2test/sdk</p>
+      <p className="font-mono text-[13px] text-ink">npm install @trace2tests/sdk</p>
       <div role="tablist" aria-label="Framework" className="mt-4 flex gap-1">
         {Object.keys(SNIPPETS).map((t) => (
           <button

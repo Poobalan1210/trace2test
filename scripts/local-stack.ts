@@ -16,7 +16,7 @@
  * (or sets it with {"on": true|false}); GET reads it. The dashboard uses both.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { withTrace2Test } from '@trace2test/sdk';
+import { withTrace2Test } from '@trace2tests/sdk';
 import { memoryIncidentStore, memoryObjectStore, type Workflow } from '@t2t/aws';
 import type { HttpEvent, HttpResult } from '@t2t/shared';
 import { createCheckoutHandler } from '../services/shop/src/checkout.js';

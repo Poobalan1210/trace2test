@@ -8,7 +8,7 @@
  * The generated test is written to .local/. Usage: npm run local:pipeline
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { withTrace2Test } from '@trace2test/sdk';
+import { withTrace2Test } from '@trace2tests/sdk';
 import { memoryIncidentStore, memoryObjectStore, memoryWorkflow } from '@t2t/aws';
 import { createCheckoutHandler } from '../services/shop/src/checkout.js';
 import { trace2testConfig } from '../services/shop/src/config.js';
