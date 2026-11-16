@@ -20,6 +20,10 @@ It runs in your own AWS account, and the SDK works with Node.js services on Lamb
 
 ## Architecture
 
+![Trace2Test architecture: the SDK sends redacted failures to API Gateway and an ingest Lambda, which starts a Step Functions pipeline that replays on staging, writes the test and opens a pull request; results go to DynamoDB and S3, read by the dashboard](docs/media/architecture.png)
+
+With the demo shop, in detail:
+
 ```
 Customer
    |

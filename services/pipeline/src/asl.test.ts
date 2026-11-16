@@ -41,6 +41,18 @@ test('results are saved with direct DynamoDB integrations', () => {
   }
 });
 
+test('DynamoDB expressions name every attribute through an alias, so reserved words cannot break them', () => {
+  // Bare names like `fixed` or `status` pass locally but fail on DynamoDB with a ValidationException.
+  const keywords = new Set(['SET', 'ADD', 'REMOVE', 'DELETE', 'attribute_not_exists', 'attribute_exists']);
+  for (const [name, s] of states.filter(([, s]) => s.Resource === 'arn:aws:states:::dynamodb:updateItem')) {
+    const p = (s as unknown as { Parameters: Record<string, unknown> }).Parameters;
+    const exprs = [p.UpdateExpression, p.ConditionExpression].filter(Boolean).join(' ') as string;
+    const bare = exprs.match(/(?<![#:\w])[A-Za-z_]\w*/g)!.filter((w) => !keywords.has(w));
+    expect(bare, name).toEqual([]);
+    for (const alias of exprs.match(/#\w+/g)!) expect(p.ExpressionAttributeNames, name).toHaveProperty([alias]);
+  }
+});
+
 test('a request without a staging target still gets a test, then delivery, before the result is saved', () => {
   const choice = asl.States.ReplayableChoice.Choices!.map((c) => c.Next);
   expect(choice).toEqual(['Replay', 'GenerateTest']);

@@ -22,10 +22,18 @@ const lambda = (fn, resultPath, selector, next, extraRetry = []) => ({
   Next: next,
 });
 
+// Every attribute in an expression is written as #name, so none can collide with
+// one of DynamoDB's reserved words (status, fixed, ...). The names map follows from it.
+const names = (...exprs) => Object.fromEntries([...new Set(exprs.join(' ').match(/#\w+/g))].map((n) => [n, n.slice(1)]));
+
 const update = (params, next, extra = {}) => ({
   Type: 'Task',
   Resource: 'arn:aws:states:::dynamodb:updateItem',
-  Parameters: { TableName: '${TableName}', ...params },
+  Parameters: {
+    TableName: '${TableName}',
+    ...params,
+    ExpressionAttributeNames: names(params.UpdateExpression, params.ConditionExpression ?? ''),
+  },
   ResultPath: null,
   Catch: CATCH,
   ...(next ? { Next: next } : { End: true }),
@@ -62,8 +70,7 @@ const definition = {
     },
     MarkNotReplayable: update({
       Key: incidentKey,
-      UpdateExpression: 'SET #status = :s, reason = :r, resultSavedAt = :now',
-      ExpressionAttributeNames: { '#status': 'status' },
+      UpdateExpression: 'SET #status = :s, #reason = :r, #resultSavedAt = :now',
       ExpressionAttributeValues: { ':s': { S: 'NOT_REPLAYABLE' }, ':r': { 'S.$': '$.validate.reason' }, ':now': now },
     }, null),
     Replay: lambda('ReplayFunctionArn', '$.replay', { 'stagingStatus.$': '$.Payload.stagingStatus' }, 'Compare',
@@ -98,14 +105,13 @@ const definition = {
     // Conditional, so a re-run of this state cannot count the same incident twice.
     SaveResult: update({
       Key: incidentKey,
-      UpdateExpression: 'SET #status = :s, resultSavedAt = :now',
-      ConditionExpression: 'attribute_not_exists(resultSavedAt)',
-      ExpressionAttributeNames: { '#status': 'status' },
+      UpdateExpression: 'SET #status = :s, #resultSavedAt = :now',
+      ConditionExpression: 'attribute_not_exists(#resultSavedAt)',
       ExpressionAttributeValues: { ':s': { 'S.$': '$.test.finalStatus' }, ':now': now },
     }, 'SaveMetrics', { Catch: alreadyDone('Done') }),
     SaveMetrics: update({
       Key: { pk: { S: 'METRICS' }, sk: { S: 'TOTALS' } },
-      UpdateExpression: 'ADD replayable :replayable, reproduced :rep, testsGenerated :gen, leaks :leaks, redactions :leaks, pipelineMsTotal :ms',
+      UpdateExpression: 'ADD #replayable :replayable, #reproduced :rep, #testsGenerated :gen, #leaks :leaks, #redactions :leaks, #pipelineMsTotal :ms',
       ExpressionAttributeValues: {
         ':replayable': num('$.test.replayable'), ':rep': num('$.test.reproduced'), ':gen': num('$.test.generated'),
         ':leaks': num('$.sanitize.leakCount'), ':ms': num('$.test.captureToTestMs'),
@@ -113,8 +119,7 @@ const definition = {
     }, 'Done'),
     SaveVerifyResult: update({
       Key: incidentKey,
-      UpdateExpression: 'SET #status = :s, verifiedAt = :now, stagingStatus = :st',
-      ExpressionAttributeNames: { '#status': 'status' },
+      UpdateExpression: 'SET #status = :s, #verifiedAt = :now, #stagingStatus = :st',
       ExpressionAttributeValues: { ':s': { 'S.$': '$.compare.verdict' }, ':now': now, ':st': num('$.compare.stagingStatus') },
     }, 'FixedChoice'),
     FixedChoice: {
@@ -124,13 +129,13 @@ const definition = {
     },
     MarkFirstFix: update({
       Key: incidentKey,
-      UpdateExpression: 'SET fixedAt = :now',
-      ConditionExpression: 'attribute_not_exists(fixedAt)',
+      UpdateExpression: 'SET #fixedAt = :now',
+      ConditionExpression: 'attribute_not_exists(#fixedAt)',
       ExpressionAttributeValues: { ':now': now },
     }, 'CountFix', { Catch: alreadyDone('Done') }),
     CountFix: update({
       Key: { pk: { S: 'METRICS' }, sk: { S: 'TOTALS' } },
-      UpdateExpression: 'ADD fixed :one',
+      UpdateExpression: 'ADD #fixed :one',
       ExpressionAttributeValues: { ':one': { N: '1' } },
     }, 'NotifyFix'),
     // Comments on the pull request, once, when the fix is first confirmed.
@@ -142,8 +147,8 @@ const definition = {
       Parameters: {
         TableName: '${TableName}',
         Key: incidentKey,
-        UpdateExpression: 'SET #status = :s, failure = :f',
-        ExpressionAttributeNames: { '#status': 'status' },
+        UpdateExpression: 'SET #status = :s, #failure = :f',
+        ExpressionAttributeNames: { '#status': 'status', '#failure': 'failure' },
         ExpressionAttributeValues: {
           ':s': { S: 'PIPELINE_FAILED' },
           ':f': { M: { error: { 'S.$': '$.error.Error' }, cause: { 'S.$': '$.error.Cause' } } },

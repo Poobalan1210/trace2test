@@ -121,10 +121,7 @@
             "S": "META"
           }
         },
-        "UpdateExpression": "SET #status = :s, reason = :r, resultSavedAt = :now",
-        "ExpressionAttributeNames": {
-          "#status": "status"
-        },
+        "UpdateExpression": "SET #status = :s, #reason = :r, #resultSavedAt = :now",
         "ExpressionAttributeValues": {
           ":s": {
             "S": "NOT_REPLAYABLE"
@@ -135,6 +132,11 @@
           ":now": {
             "S.$": "$$.State.EnteredTime"
           }
+        },
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#reason": "reason",
+          "#resultSavedAt": "resultSavedAt"
         }
       },
       "ResultPath": null,
@@ -364,11 +366,8 @@
             "S": "META"
           }
         },
-        "UpdateExpression": "SET #status = :s, resultSavedAt = :now",
-        "ConditionExpression": "attribute_not_exists(resultSavedAt)",
-        "ExpressionAttributeNames": {
-          "#status": "status"
-        },
+        "UpdateExpression": "SET #status = :s, #resultSavedAt = :now",
+        "ConditionExpression": "attribute_not_exists(#resultSavedAt)",
         "ExpressionAttributeValues": {
           ":s": {
             "S.$": "$.test.finalStatus"
@@ -376,6 +375,10 @@
           ":now": {
             "S.$": "$$.State.EnteredTime"
           }
+        },
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#resultSavedAt": "resultSavedAt"
         }
       },
       "ResultPath": null,
@@ -410,7 +413,7 @@
             "S": "TOTALS"
           }
         },
-        "UpdateExpression": "ADD replayable :replayable, reproduced :rep, testsGenerated :gen, leaks :leaks, redactions :leaks, pipelineMsTotal :ms",
+        "UpdateExpression": "ADD #replayable :replayable, #reproduced :rep, #testsGenerated :gen, #leaks :leaks, #redactions :leaks, #pipelineMsTotal :ms",
         "ExpressionAttributeValues": {
           ":replayable": {
             "N.$": "States.Format('{}', $.test.replayable)"
@@ -427,6 +430,14 @@
           ":ms": {
             "N.$": "States.Format('{}', $.test.captureToTestMs)"
           }
+        },
+        "ExpressionAttributeNames": {
+          "#replayable": "replayable",
+          "#reproduced": "reproduced",
+          "#testsGenerated": "testsGenerated",
+          "#leaks": "leaks",
+          "#redactions": "redactions",
+          "#pipelineMsTotal": "pipelineMsTotal"
         }
       },
       "ResultPath": null,
@@ -454,10 +465,7 @@
             "S": "META"
           }
         },
-        "UpdateExpression": "SET #status = :s, verifiedAt = :now, stagingStatus = :st",
-        "ExpressionAttributeNames": {
-          "#status": "status"
-        },
+        "UpdateExpression": "SET #status = :s, #verifiedAt = :now, #stagingStatus = :st",
         "ExpressionAttributeValues": {
           ":s": {
             "S.$": "$.compare.verdict"
@@ -468,6 +476,11 @@
           ":st": {
             "N.$": "States.Format('{}', $.compare.stagingStatus)"
           }
+        },
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#verifiedAt": "verifiedAt",
+          "#stagingStatus": "stagingStatus"
         }
       },
       "ResultPath": null,
@@ -506,12 +519,15 @@
             "S": "META"
           }
         },
-        "UpdateExpression": "SET fixedAt = :now",
-        "ConditionExpression": "attribute_not_exists(fixedAt)",
+        "UpdateExpression": "SET #fixedAt = :now",
+        "ConditionExpression": "attribute_not_exists(#fixedAt)",
         "ExpressionAttributeValues": {
           ":now": {
             "S.$": "$$.State.EnteredTime"
           }
+        },
+        "ExpressionAttributeNames": {
+          "#fixedAt": "fixedAt"
         }
       },
       "ResultPath": null,
@@ -546,11 +562,14 @@
             "S": "TOTALS"
           }
         },
-        "UpdateExpression": "ADD fixed :one",
+        "UpdateExpression": "ADD #fixed :one",
         "ExpressionAttributeValues": {
           ":one": {
             "N": "1"
           }
+        },
+        "ExpressionAttributeNames": {
+          "#fixed": "fixed"
         }
       },
       "ResultPath": null,
@@ -619,9 +638,10 @@
             "S": "META"
           }
         },
-        "UpdateExpression": "SET #status = :s, failure = :f",
+        "UpdateExpression": "SET #status = :s, #failure = :f",
         "ExpressionAttributeNames": {
-          "#status": "status"
+          "#status": "status",
+          "#failure": "failure"
         },
         "ExpressionAttributeValues": {
           ":s": {

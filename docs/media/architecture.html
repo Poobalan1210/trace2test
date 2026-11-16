@@ -1,0 +1,110 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Trace2Test architecture</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#121722; --line:#2a3446; --ink:#e8ecf3; --muted:#8b95a7; --amber:#f5a524; --amberSoft:rgba(245,165,36,.08); }
+  html,body { margin:0; background:var(--bg); }
+  svg { display:block; font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif; }
+  .g { transition:none; }
+  body.f-ingest .g:not(.ingest), body.f-pipe .g:not(.pipe), body.f-data .g:not(.data) { opacity:.22; }
+  #cap { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); max-width:900px; padding:14px 22px; border-radius:12px;
+         background:rgba(10,12,16,.92); color:#fff; font:500 19px/1.45 -apple-system,BlinkMacSystemFont,sans-serif; text-align:center;
+         box-shadow:0 8px 30px rgba(0,0,0,.35); display:none; }
+</style></head>
+<body>
+<svg id="s" width="1280" height="800" viewBox="0 0 1280 800"></svg>
+<div id="cap"></div>
+<script>
+const P = new URLSearchParams(location.search);
+if (P.get('focus')) document.body.classList.add('f-' + P.get('focus'));
+if (P.get('cap')) { const c = document.getElementById('cap'); c.textContent = P.get('cap'); c.style.display = 'block'; }
+if (P.get('h')) { const s = document.getElementById('s'); s.setAttribute('height', P.get('h')); s.setAttribute('viewBox', `0 0 1280 ${P.get('h')}`); }
+
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('s');
+const el = (tag, attrs, parent = svg, text) => {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  parent.appendChild(e);
+  return e;
+};
+const C = { line:'#2a3446', panel:'#121722', ink:'#e8ecf3', muted:'#8b95a7', amber:'#f5a524' };
+const defs = el('defs', {});
+for (const [id, color] of [['a', C.muted], ['aa', C.amber]]) {
+  const m = el('marker', { id, viewBox:'0 0 10 10', refX:9, refY:5, markerWidth:7, markerHeight:7, orient:'auto-start-reverse' }, defs);
+  el('path', { d:'M0,0 L10,5 L0,10 z', fill:color }, m);
+}
+const group = (cls) => el('g', { class:'g ' + cls });
+
+// kind: 'aws' (part of the Trace2Test stack) or 'ext' (your systems)
+function box(g, x, y, w, h, title, sub, kind = 'aws', tag) {
+  el('rect', { x, y, width:w, height:h, rx:10, fill: kind === 'aws' ? 'rgba(245,165,36,.07)' : C.panel,
+               stroke: kind === 'aws' ? 'rgba(245,165,36,.55)' : '#3a4558', 'stroke-width':1.2 }, g);
+  let ty = y + (sub ? h / 2 - 4 : h / 2 + 5);
+  if (tag) { el('text', { x:x + 14, y:y + 19, fill: kind === 'aws' ? C.amber : C.muted, 'font-size':10.5, 'font-weight':600, 'letter-spacing':'.06em' }, g, tag.toUpperCase()); ty += 7; }
+  el('text', { x:x + 14, y:ty, fill:C.ink, 'font-size':15, 'font-weight':600 }, g, title);
+  if (sub) sub.split('\n').forEach((line, i) => el('text', { x:x + 14, y:ty + 19 + i * 16, fill:C.muted, 'font-size':12.5 }, g, line));
+}
+function arrow(g, d, label, lx, ly, anchor = 'middle', amber = false) {
+  el('path', { d, fill:'none', stroke: amber ? C.amber : C.muted, 'stroke-width':1.5, 'marker-end':`url(#${amber ? 'aa' : 'a'})` }, g);
+  if (label) el('text', { x:lx, y:ly, fill:C.muted, 'font-size':11.5, 'text-anchor':anchor }, g, label);
+}
+function dashed(g, d, label, lx, ly, anchor = 'start') {
+  el('path', { d, fill:'none', stroke:C.muted, 'stroke-width':1.2, 'stroke-dasharray':'4 4', 'marker-end':'url(#a)' }, g);
+  if (label) el('text', { x:lx, y:ly, fill:C.muted, 'font-size':11.5, 'text-anchor':anchor }, g, label);
+}
+
+// Header
+el('text', { x:40, y:50, fill:C.amber, 'font-size':12, 'font-weight':700, 'letter-spacing':'.12em' }, svg, 'ARCHITECTURE');
+el('text', { x:40, y:82, fill:C.ink, 'font-size':26, 'font-weight':650 }, svg, 'Trace2Test: one sam deploy, all serverless');
+
+// 1. Capture and ingest
+const gi = group('ingest');
+box(gi, 40, 110, 240, 86, 'Your service', 'production, with\n@trace2tests/sdk', 'ext', 'Captures + redacts');
+box(gi, 365, 110, 205, 86, 'API Gateway', 'HTTP API\nPOST /incidents', 'aws', 'Ingest');
+box(gi, 655, 110, 255, 86, 'Ingest Lambda', 'check key, fingerprint, dedupe\nstore capture, start pipeline', 'aws');
+arrow(gi, 'M280,153 L363,153', 'failed request', 322, 144);
+arrow(gi, 'M570,153 L653,153', '', 0, 0);
+arrow(gi, 'M782,196 L782,243', 'starts execution', 792, 226, 'start');
+
+// 2. Pipeline
+const gp = group('pipe');
+el('rect', { x:40, y:245, width:910, height:132, rx:12, fill:'rgba(245,165,36,.04)', stroke:'rgba(245,165,36,.55)', 'stroke-width':1.2 }, gp);
+el('text', { x:58, y:271, fill:C.amber, 'font-size':10.5, 'font-weight':600, 'letter-spacing':'.06em' }, gp, 'AWS STEP FUNCTIONS');
+el('text', { x:196, y:271, fill:C.ink, 'font-size':13, 'font-weight':600 }, gp, 'capture pipeline');
+el('text', { x:932, y:271, fill:C.muted, 'font-size':11.5, 'text-anchor':'end' }, gp, 'verify mode: Replay → Compare → verdict → PR comment');
+const steps = [['Sanitize', 'redact again'], ['Validate', 'route allowed?'], ['Replay', 'on staging'], ['Compare', 'same failure?'],
+               ['Generate test', 'Jest, template'], ['Deliver', 'pull request'], ['Save result', 'to DynamoDB']];
+steps.forEach(([t, s], i) => {
+  const x = 62 + i * 124;
+  el('rect', { x, y:292, width:110, height:62, rx:8, fill:C.panel, stroke:'#3a4558', 'stroke-width':1 }, gp);
+  el('text', { x:x + 11, y:318, fill:C.ink, 'font-size':13.5, 'font-weight':600 }, gp, t);
+  el('text', { x:x + 11, y:338, fill:C.muted, 'font-size':11.5 }, gp, s);
+  if (i < steps.length - 1) arrow(gp, `M${x + 110},323 L${x + 122},323`, '', 0, 0, 'middle', true);
+});
+box(gp, 262, 420, 220, 74, 'Staging copy', 'same request, plus an\nx-t2t-replay header', 'ext');
+box(gp, 634, 420, 236, 74, 'GitHub', 'pull request with the test\ntoken from SSM Parameter Store', 'ext');
+arrow(gp, 'M372,354 L372,418', '', 0, 0);
+arrow(gp, 'M744,354 L744,418', '', 0, 0);
+
+// 3. Data and dashboard
+const gd = group('data');
+box(gd, 40, 530, 440, 72, 'Amazon DynamoDB', 'incidents, fingerprints, metrics', 'aws');
+box(gd, 510, 530, 440, 72, 'Amazon S3', 'redacted captures, replays, generated tests', 'aws');
+dashed(gd, 'M150,377 L150,528', 'results', 158, 404);
+dashed(gd, 'M560,377 L560,528', 'bundles, tests', 568, 404);
+box(gd, 990, 110, 250, 86, 'Dashboard', 'React app on\nCloudFront + S3', 'aws', 'You');
+box(gd, 990, 281, 250, 86, 'API Lambda', 'incidents, tests, metrics\nbehind the same HTTP API', 'aws');
+arrow(gd, 'M1115,196 L1115,279', 'token', 1123, 243, 'start');
+arrow(gd, 'M988,324 L952,324', '', 0, 0);
+el('text', { x:995, y:393, fill:C.muted, 'font-size':11.5 }, gd, '“Re-run on staging” → verify mode');
+dashed(gd, 'M1225,367 L1225,566 L952,566', 'reads', 1217, 470, 'end');
+
+// Legend
+const lg = el('g', {});
+el('rect', { x:40, y:628, width:14, height:14, rx:3, fill:'rgba(245,165,36,.07)', stroke:'rgba(245,165,36,.55)' }, lg);
+el('text', { x:62, y:640, fill:C.muted, 'font-size':12.5 }, lg, 'Trace2Test stack on AWS');
+el('rect', { x:250, y:628, width:14, height:14, rx:3, fill:C.panel, stroke:'#3a4558' }, lg);
+el('text', { x:272, y:640, fill:C.muted, 'font-size':12.5 }, lg, 'Your systems');
+</script>
+</body></html>
